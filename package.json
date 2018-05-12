@@ -1,0 +1,34 @@
+{
+  "name": "arragro.imageservice",
+  "version": "1.0.0",
+  "description": "A service wrapper for GraphicsMagic or ImageMagic for Arragro services, intended as a microservice for image manipulation",
+  "main": "index.js",
+  "scripts": {
+    "test": "node test/index.js"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Arragro/Arragro.ImageService.git"
+  },
+  "author": "Mike Jewell",
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/Arragro/Arragro.ImageService/issues"
+  },
+  "homepage": "https://github.com/Arragro/Arragro.ImageService#readme",
+  "devDependencies": {
+    "jest": "^22.4.3"
+  },
+  "dependencies": {
+    "express": "^4.16.3",
+    "fs": "0.0.1-security",
+    "gifsicle": "^3.0.4",
+    "gm": "^1.23.1",
+    "imagemin": "^5.3.1",
+    "imagemin-gifsicle": "^5.2.0",
+    "multer": "^1.3.0",
+    "simple-bufferstream": "^1.0.0",
+    "stream-length": "^1.0.2",
+    "stream-to-array": "^2.3.0"
+  }
+}
