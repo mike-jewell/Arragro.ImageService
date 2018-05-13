@@ -1,22 +1,24 @@
 const fs = require('fs')
 const util = require('util')
+const Promise = require('bluebird');
+
 const gm = require('gm').subClass({imageMagick: true});
 const express = require('express');
 const multer = require('multer');
-const unlinkAsync = util.promisify(fs.unlink);
 const imagemin = require('imagemin');
-const imageminGifSicle = require('imagemin-gifsicle');
+const imageminGifSicle = require('./imagemin-gifsicle');
 const toArray = require('stream-to-array');
 const sbuff = require('simple-bufferstream');
-const streamLength = require("stream-length");
 
+Promise.promisifyAll(gm.prototype);
 
 function fileFilter(req, file, cb) {
     console.log('file is', file)
     cb(null,true);
 }
 
-const upload = multer({ dest: 'uploads/' })
+const storage = multer.memoryStorage();
+const upload = multer({ dest: 'uploads/', storage: storage });
 const app = express();
 app.use(express.static('public'));
 
@@ -33,7 +35,9 @@ function getBinaryData(req, res, next) {
 }
 
 function getMimeType (features) {
-    if (typeof(features['Mime type']) === 'string') {
+    if (features.format === 'MVG') {
+        return 'image/svg+xml';
+    } else if (typeof(features['Mime type']) === 'string') {
         return features['Mime type'];
     } else {
         return features['Mime type'][0];
@@ -52,19 +56,62 @@ async function streamToBuffer(fileStream) {
     }
 }
 
-async function processGif (res, next, features, fileStream, im, options) {
-    var buffer = await streamToBuffer(fileStream);
-    return imagemin.buffer(buffer, {use: [imageminGifSicle({ interlaced: true, optimizationLevel: 3 })]});
+async function processGif (buffer, options) {
+    return await imagemin.buffer(buffer, {use: [imageminGifSicle({ interlaced: true, optimizationLevel: 3, resize: options.width })]});
 }
 
-function handleResize (res, next, features, fileStream, im, options) {
-    switch (features.format) {
-        case "SVG":
-            return streamToBuffer(fileStream);
+async function processImage (format, buffer, options) {
+    let image = new gm(buffer)
+      .resize(options.width)
+      .strip()
+      .interlace('Line')
+      .quality(options.quality)
+    
+    if (options.asProgressiveJpeg !== undefined && options.asProgressiveJpeg === 'true') {
+        image = image.setFormat('pjpeg');
+    } else {
+        image = image.setFormat(format);
+    }
+    return await image.toBufferAsync();
+}
+
+async function handleResize (format, buffer, options) {
+    switch (format) {
         case "GIF":        
-            return processGif(res, next, features, fileStream, im, options);
+            return await processGif(buffer, options);
+        case "SVG":
+        case "MVG":
+            return new Promise(function(resolve, reject) {
+                resolve(buffer);
+            });
         default:
-            return streamToBuffer(fileStream);
+            return await processImage(format, buffer, options);
+    }
+}
+
+async function processResizeAndRespond (req, res, features, options) {
+    if (options.width > features.size.width) {
+        res.status(500).send({ 
+            error: `You cannot increase the size of an image, use css to do that on your page: requested - ${options.width}, actual - ${features.size.width}`
+        });
+        return;
+    }
+
+    try {
+        var buffer = await handleResize(features.format, req.file.buffer, options);
+
+        var header = {
+            'Content-Type': getMimeType(features),
+        }
+        res.writeHead(200, header);
+        
+        const s = sbuff(buffer.slice(0));
+        s.pipe(res);
+    } catch (err) {
+        res.status(500).send({ 
+            error: 'Something has gon wrong when processing the file!',
+            message: err.message
+        });
     }
 }
 
@@ -75,51 +122,29 @@ app.post('/image/resize', upload.single('image'), async function (req, res, next
         });
         return;
     }
-    let fileStream = fs.createReadStream(req.file.path);
-    const im = gm(fileStream);
+    let options = req.body;
 
-    const options = req.body;
-    if (!options.width || isNaN(parseInt(options.width))) {
-        res.status(500).send({ 
-            error: 'You need to supply a numeric width'
-        });
-        return;
-    }
-    if (!options.quality || isNaN(parseInt(options.quality))) {
-        res.status(500).send({ 
-            error: 'You need to supply a numeric width'
-        });
-        return;
-    }
-
-    im.identify(async function(err, features){
-        if (err) {
-            console.log('Error', err);
-            res.status(500).send({ 
-                error: 'Something has gon wrong when identifying the file!',
-                message: err.message
-            });
-        } else {
-            fileStream = fs.createReadStream(req.file.path);
-            await unlinkAsync(req.file.path);
-
-            handleResize(res, next, features, fileStream, im, options)
-                .then(buffer => {                
-                    streamLength(buffer, {}, (err, result) => {
-                        var header = {
-                            'Content-Type': getMimeType(features)
-                        }
-                        if (!err) {
-                            header['Content-Length'] = result;
-                        }
-                        res.writeHead(200, header);
-                        const s = sbuff(buffer);
-                        s.pipe(res);
-                        next();
-                    })
-                });
+    try {
+        const im = gm(req.file.buffer);
+        const features = await im.identifyAsync();
+        
+        if (!options.width || isNaN(parseInt(options.width))) {
+            options.width = features.size.width
         }
-    });
+        
+        if (!options.quality || isNaN(parseInt(options.quality))) {
+            options.quality = 80
+        }
+
+        await processResizeAndRespond(req, res, features, options)
+    }
+    catch (err) {
+        console.log('Error', err);
+        res.status(500).send({ 
+            error: 'Something has gone wrong when identifying the file!',
+            message: err.message
+        });
+    }
 });
 
 
