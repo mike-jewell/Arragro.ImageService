@@ -56,66 +56,73 @@ async function streamToBuffer(fileStream) {
     }
 }
 
-async function processGif (buffer, options) {
-    return await imagemin.buffer(buffer, {use: [imageminGifSicle({ interlaced: true, optimizationLevel: 3, resize: options.width })]});
+async function processGif (features, buffer, options) {
+    let width = features.size.width;
+    if (options.width && options.width <= width) {
+        width = options.width;
+    }
+
+    return await imagemin.buffer(buffer, {use: [imageminGifSicle({ interlaced: true, optimizationLevel: 3, resize: width })]});
 }
 
-async function processImage (format, buffer, options) {
+async function processImage (features, buffer, options) {
     let image = new gm(buffer)
-      .resize(options.width)
-      .strip()
-      .interlace('Line')
-      .quality(options.quality)
+        .strip()
+        .interlace('Line')
+        .quality(options.quality)
+
+    if (options.width <= features.size.width) {        
+      image.resize(options.width)
+    }
     
     if (options.asProgressiveJpeg !== undefined && options.asProgressiveJpeg === 'true') {
         image = image.setFormat('pjpeg');
     } else {
-        image = image.setFormat(format);
+        image = image.setFormat(features.format);
     }
     return await image.toBufferAsync();
 }
 
-async function handleResize (format, buffer, options) {
-    switch (format) {
+async function handleResize (features, buffer, options) {
+    switch (features.format) {
         case "GIF":        
-            return await processGif(buffer, options);
+            return await processGif(features, buffer, options);
         case "SVG":
         case "MVG":
             return new Promise(function(resolve, reject) {
                 resolve(buffer);
             });
         default:
-            return await processImage(format, buffer, options);
+            return await processImage(features, buffer, options);
     }
 }
 
 async function processResizeAndRespond (req, res, features, options) {
-    if (options.width > features.size.width) {
-        res.status(500).send({ 
-            error: `You cannot increase the size of an image, use css to do that on your page: requested - ${options.width}, actual - ${features.size.width}`
-        });
-        return;
-    }
-
     try {
-        var buffer = await handleResize(features.format, req.file.buffer, options);
+        var buffer = await handleResize(features, req.file.buffer, options);
+        var imageDetails = await gm(buffer).identifyAsync();
 
         var header = {
             'Content-Type': getMimeType(features),
+            'Image-Height': imageDetails.size.height,
+            'Image-Width': imageDetails.size.width,
+            'IsImage': features.format !== 'SVG' && features.format !== 'MVG'
         }
         res.writeHead(200, header);
         
+        console.log(header);
         const s = sbuff(buffer.slice(0));
         s.pipe(res);
     } catch (err) {
         res.status(500).send({ 
-            error: 'Something has gon wrong when processing the file!',
+            error: 'Something has gone wrong when processing the file!',
             message: err.message
         });
     }
 }
 
 app.post('/image/resize', upload.single('image'), async function (req, res, next) {
+    console.log(req);
     if (!req.file || !req.body) {
         res.status(500).send({ 
             error: 'You need to supply a file with options'
