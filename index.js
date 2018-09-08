@@ -110,7 +110,6 @@ async function processResizeAndRespond (req, res, features, options) {
         }
         res.writeHead(200, header);
         
-        console.log(header);
         const s = sbuff(buffer.slice(0));
         s.pipe(res);
     } catch (err) {
@@ -122,7 +121,6 @@ async function processResizeAndRespond (req, res, features, options) {
 }
 
 app.post('/image/resize', upload.single('image'), async function (req, res, next) {
-    console.log(req);
     if (!req.file || !req.body) {
         res.status(500).send({ 
             error: 'You need to supply a file with options'
