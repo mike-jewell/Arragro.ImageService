@@ -9,6 +9,7 @@ const imagemin = require('imagemin');
 const imageminGifSicle = require('./imagemin-gifsicle');
 const toArray = require('stream-to-array');
 const sbuff = require('simple-bufferstream');
+const mimetypes = require('mime-types');
 
 Promise.promisifyAll(gm.prototype);
 
@@ -37,10 +38,8 @@ function getBinaryData(req, res, next) {
 function getMimeType (features) {
     if (features.format === 'MVG') {
         return 'image/svg+xml';
-    } else if (typeof(features['Mime type']) === 'string') {
-        return features['Mime type'];
     } else {
-        return features['Mime type'][0];
+        return mimetypes.lookup(features.format)
     }
 }
 
@@ -99,13 +98,18 @@ async function handleResize (features, buffer, options) {
 
 async function processResizeAndRespond (req, res, features, options) {
     try {
+        console.time("handleResize");
         var buffer = await handleResize(features, req.file.buffer, options);
-        var imageDetails = await gm(buffer).identifyAsync();
+        console.timeEnd("handleResize");
+
+        console.time("size");
+        var size = await gm(buffer).sizeAsync();
+        console.timeEnd("size");
 
         var header = {
             'Content-Type': getMimeType(features),
-            'Image-Height': imageDetails.size.height,
-            'Image-Width': imageDetails.size.width,
+            'Image-Height': size.height,
+            'Image-Width': size.width,
             'IsImage': features.format !== 'SVG' && features.format !== 'MVG'
         }
         res.writeHead(200, header);
@@ -130,15 +134,21 @@ app.post('/image/resize', upload.single('image'), async function (req, res, next
     let options = req.body;
 
     try {
-        const im = gm(req.file.buffer);
-        const features = await im.identifyAsync();
+        console.time("size");
+        var size = await gm(req.file.buffer).sizeAsync();
+        console.timeEnd("size");
         
         if (!options.width || isNaN(parseInt(options.width))) {
-            options.width = features.size.width
+            options.width = size.width
         }
         
         if (!options.quality || isNaN(parseInt(options.quality))) {
             options.quality = 80
+        }
+
+        const features = {
+            size: size,
+            format: await gm(req.file.buffer).formatAsync()
         }
 
         await processResizeAndRespond(req, res, features, options)
@@ -154,5 +164,5 @@ app.post('/image/resize', upload.single('image'), async function (req, res, next
 
 
 app.listen(3000, function () {
-	console.log('ImageOptimizer listening on port 3000!');
+	console.log('ImageOptimizer listening on port 3000!!!');
 });

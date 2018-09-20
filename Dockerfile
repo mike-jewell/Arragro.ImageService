@@ -1,5 +1,5 @@
 # Start from base node alpine image
-FROM node:carbon-alpine AS build-env
+FROM node:10.10-alpine AS build-env
 
 # install imagemagick
 RUN apk add --no-cache autoconf
@@ -15,9 +15,10 @@ RUN npm install
 
 COPY . .
 
-FROM node:carbon-alpine
+FROM node:10.10-alpine
 
 RUN apk add --no-cache imagemagick
+RUN apk add --no-cache graphicsmagick
 
 WORKDIR /usr/src/app
 
